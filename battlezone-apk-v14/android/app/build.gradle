@@ -1,0 +1,25 @@
+plugins { id 'com.android.application' }
+android {
+    namespace = 'kr.battlezone.precision'
+    compileSdk = 36
+    defaultConfig {
+        applicationId = 'kr.battlezone.precision'
+        minSdk = 29
+        targetSdk = 36
+        versionCode = 14
+        versionName = '0.14.0'
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix = '.debug'
+            versionNameSuffix = '-test'
+            debuggable = true
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildFeatures { buildConfig = true }
+}
+dependencies { implementation 'androidx.webkit:webkit:1.14.0' }
