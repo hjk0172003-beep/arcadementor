@@ -32,6 +32,24 @@ try{
  await page.evaluate(()=>{for(let i=0;i<11;i++)document.getElementById('setupBgmToggle').click()});await page.waitForTimeout(200);check((await state()).paused,'Rapid toggles ending OFF never leak delayed audio');
  check(await page.evaluate(()=>window.storageCalls===0),'Game recording/history storage not modified');check(errors.length===0,'No browser JavaScript errors');
  await context.close();await browser.close();browser=null;
- browser=await chromium.launch({headless:true,args:['--autoplay-policy=user-gesture-required']});const touch=await browser.newContext({viewport:{width:915,height:412},hasTouch:true,isMobile:true});const tp=await touch.newPage();await tp.goto(url);await tp.evaluate(()=>showSetup());await tp.waitForTimeout(150);check(await tp.evaluate(()=>document.getElementById('bzMenuBgmAudio').paused),'Blocked autoplay handled without crash');await tp.tap('#modePistol');await playing(tp);check(true,'Real touch starts menu BGM under gesture policy');await tp.tap('#enterRange');await tp.waitForTimeout(100);check(await tp.evaluate(()=>document.getElementById('bzMenuBgmAudio').paused),'Touch entry to shooting also stops BGM');await touch.close();
- fs.mkdirSync('test-results',{recursive:true});fs.writeFileSync('test-results/browser.json',JSON.stringify({scope:'Isolated DOM fixture with generated test WAV, not the user game or supplied recording',checks:results},null,2));console.log(`BGM browser checks passed: ${results.length}`);
+ // Headless engines and DevTools evaluations may grant activation implicitly.
+ // Inject a deterministic NotAllowedError ONLY in this fixture until a real touch,
+ // then restore normal media playback; the distributed addon is never altered.
+ browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required']});
+ const touch=await browser.newContext({viewport:{width:915,height:412},hasTouch:true,isMobile:true});
+ await touch.addInitScript(()=>{
+   const original=HTMLMediaElement.prototype.play;let unlocked=false;window.deniedAutoplayCount=0;
+   window.addEventListener('pointerdown',e=>{if(e.isTrusted)unlocked=true},true);
+   HTMLMediaElement.prototype.play=function(){
+     if(this.id==='bzMenuBgmAudio'&&!unlocked){window.deniedAutoplayCount++;return Promise.reject(new DOMException('Simulated autoplay restriction for this test','NotAllowedError'))}
+     return original.call(this);
+   };
+ });
+ const tp=await touch.newPage();const touchErrors=[];tp.on('pageerror',e=>touchErrors.push(e.message));
+ await tp.goto(url);await tp.evaluate(()=>showSetup());await tp.waitForTimeout(150);
+ check(await tp.evaluate(()=>document.getElementById('bzMenuBgmAudio').paused&&window.deniedAutoplayCount>0),'Simulated autoplay denial is caught and stays silent');
+ await tp.tap('#modePistol');await playing(tp);check(true,'Real trusted touch retries and starts original media playback');
+ await tp.tap('#enterRange');await tp.waitForTimeout(100);check(await tp.evaluate(()=>document.getElementById('bzMenuBgmAudio').paused),'Touch entry to shooting also stops BGM');
+ check(touchErrors.length===0,'No unhandled errors after autoplay denial and recovery');await touch.close();
+ fs.mkdirSync('test-results',{recursive:true});fs.writeFileSync('test-results/browser.json',JSON.stringify({scope:'Isolated DOM fixture and generated test WAV; final fallback test injects NotAllowedError before a real touch. Not the user game or supplied recording.',checks:results},null,2));console.log(`BGM browser checks passed: ${results.length}`);
 }finally{if(browser)await browser.close();await new Promise(r=>server.close(r));}
