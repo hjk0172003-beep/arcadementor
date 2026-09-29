@@ -56,7 +56,6 @@
   function stop() {
     try { audio.pause(); } catch (_) {}
     try { if (audio.currentTime !== 0) audio.currentTime = 0; } catch (_) {}
-    // Abort a pending autoplay request; late resolution can never re-enable playback.
     pending = null;
   }
   function start() {
@@ -70,8 +69,7 @@
           if (!allowed()) stop();
         }).catch(function () {
           if (pending === attempt) pending = null;
-          // Autoplay restrictions are retried on the next ordinary menu gesture.
-          // They must never block the original game button.
+          // Retry a blocked autoplay on the next menu gesture, never block a game button.
         });
       }
     } catch (_) {}
@@ -96,7 +94,8 @@
     if (target && (target.id === 'enterRange' || target.id === 'startGameButton')) {
       leaving = true;
       stop();
-      Promise.resolve().then(refresh);
+      // A microtask can run between capture and target listeners; use a new task.
+      setTimeout(refresh, 0);
       return;
     }
     if (target !== button && allowed()) start();
