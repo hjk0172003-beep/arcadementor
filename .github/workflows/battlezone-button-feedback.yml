@@ -1,0 +1,95 @@
+name: BattleZone button feedback update
+on:
+  push:
+    branches: [battlezone-button-feedback-20260929]
+    paths: ['button-feedback/**', 'button-feedback-tests/**', '.github/workflows/battlezone-button-feedback.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: battlezone-button-feedback
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test actual mouse, keyboard, touch and WebAudio
+        run: |
+          set -euo pipefail
+          node --check button-feedback/ui-button-sound.js
+          npm install --no-save --no-package-lock playwright@1.55.1
+          npx playwright install --with-deps chromium
+          node button-feedback-tests/browser.test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: button-feedback-browser-results
+          path: test-results/
+          retention-days: 5
+          if-no-files-found: warn
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test apply and preservation using Windows PowerShell 5.1
+        shell: powershell
+        run: .\button-feedback-tests\installer.test.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: button-feedback-windows-results
+          path: test-results/
+          retention-days: 5
+          if-no-files-found: warn
+  package:
+    needs: [browser, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: button-feedback-*-results
+          path: collected-results
+          merge-multiple: true
+      - name: Create update ZIP and optional sound sample
+        run: |
+          set -euo pipefail
+          mkdir -p output/BattleZone_ButtonSound_Update/checks
+          cp button-feedback/* output/BattleZone_ButtonSound_Update/
+          cp collected-results/*.json output/BattleZone_ButtonSound_Update/checks/
+          python3 - <<'PY'
+          from pathlib import Path
+          import math, struct, wave, hashlib, json
+          root=Path('output/BattleZone_ButtonSound_Update')
+          sr=48000; duration=.055; seed=137; frames=[]
+          for i in range(math.ceil(sr*duration)):
+              t=i/sr; seed=(seed*1664525+1013904223)&0xffffffff
+              noise=seed/4294967296*2-1
+              env=min(1,t/.0015)*max(0,min(1,(duration-t)/.007))*math.exp(-80*t)
+              s=.26*(.53*math.sin(2*math.pi*780*t)+.23*math.sin(2*math.pi*1560*t)+.18*noise*math.exp(-100*t))*env
+              frames.append(struct.pack('<h',round(max(-1,min(1,s))*32767)))
+          with wave.open(str(root/'Button_Sound_Sample.wav'),'wb') as w:
+              w.setparams((1,2,sr,0,'NONE','not compressed'));w.writeframes(b''.join(frames))
+          for p in root.glob('checks/*.json'):
+              r=json.loads(p.read_text(encoding='utf-8-sig'));print(p.name,r['passed'],r['scope'])
+          (root/'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.relative_to(root).as_posix()+'\n' for p in sorted(root.rglob('*')) if p.is_file()),encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BattleZone_ButtonSound_Update
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
