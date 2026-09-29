@@ -80,9 +80,9 @@ try {
     [IO.File]::WriteAllBytes($IndexTemp, $NewIndexBytes)
     [IO.File]::WriteAllBytes($ScriptTemp, $NewScript)
     if ((Hash $Index) -ne $OriginalHash) { throw 'index.html changed while updating. Please close the editor and retry.' }
-    if ($HadScript) { [IO.File]::Replace($ScriptTemp, $Target, $null) } else { [IO.File]::Move($ScriptTemp, $Target) }
+    if ($HadScript) { [IO.File]::Replace($ScriptTemp, $Target, (Join-Path $Backup 'ui-button-sound.replaced.js')) } else { [IO.File]::Move($ScriptTemp, $Target) }
     $ScriptWritten = $true
-    [IO.File]::Replace($IndexTemp, $Index, $null)
+    [IO.File]::Replace($IndexTemp, $Index, (Join-Path $Backup 'index.replaced.html'))
     $IndexWritten = $true
     foreach ($Path in $Protected.Keys) {
         if ((Hash $Path) -ne $Protected[$Path]) { throw 'Another original web file changed during installation. Update rolled back.' }
