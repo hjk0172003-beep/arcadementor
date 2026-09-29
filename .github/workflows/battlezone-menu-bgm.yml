@@ -1,0 +1,81 @@
+name: BattleZone menu-only BGM update
+on:
+  push:
+    branches: [battlezone-menu-bgm-20260929]
+    paths: ['menu-bgm/**', 'menu-bgm-tests/**', '.github/workflows/battlezone-menu-bgm.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test actual browser media and menu transitions in isolated fixture
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+          node --check menu-bgm/menu-bgm.js
+          node menu-bgm-tests/browser.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bgm-browser-verification
+          path: test-results/
+          retention-days: 5
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify installer and preservation in Windows PowerShell 5.1
+        shell: powershell
+        run: .\menu-bgm-tests\windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bgm-windows-verification
+          path: test-results/
+          retention-days: 5
+  package:
+    needs: [browser, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: verification
+          pattern: bgm-*-verification
+          merge-multiple: true
+      - name: Package reversible updater (user chooses own WAV locally)
+        run: |
+          mkdir -p package/BattleZone_MenuBGM_Update
+          cp menu-bgm/* package/BattleZone_MenuBGM_Update/
+          cp -r verification package/BattleZone_MenuBGM_Update/
+          python - <<'PY'
+          from pathlib import Path
+          base=Path('package/BattleZone_MenuBGM_Update')
+          for f in base.glob('*.cmd'):
+              f.write_bytes(f.read_text().replace('\r\n','\n').replace('\n','\r\n').encode('ascii'))
+          for f in base.glob('*.md'):
+              f.write_bytes(f.read_text().encode('utf-8-sig'))
+          import hashlib
+          lines=[]
+          for f in sorted(base.rglob('*')):
+              if f.is_file():lines.append(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+str(f.relative_to(base)))
+          (base/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BattleZone_MenuBGM_Update
+          path: package/
+          if-no-files-found: error
+          retention-days: 7
