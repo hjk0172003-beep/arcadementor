@@ -1,0 +1,137 @@
+name: BattleZone menu and logo update
+on:
+  push:
+    branches: [battlezone-brand-menus-20260930]
+    paths: ['brand-menus/**', '.github/workflows/battlezone-brand-menus.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: battlezone-brand-menus
+  cancel-in-progress: true
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate clean raster splash and adaptive vector logo
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk fonts-dejavu-core >/dev/null
+          python -m pip install pillow cairosvg fonttools
+          python brand-menus/build_assets.py
+          node --check brand-menus/payload/bz-menu-music.js
+          node --check brand-menus/payload/bz-brand-menus.js
+          node --check brand-menus/payload/splash-data.js
+      - name: Compile the actual launcher resources with Android aapt2
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p brand-menus/verification /tmp/bz-icon-check
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt2"
+          "$AAPT" compile --dir brand-menus/payload/res -o /tmp/bz-icon-check/resources.zip
+          echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="example.bz.iconcheck"><uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36"/><application android:label="Resource verification" android:icon="@mipmap/bz_launcher" android:roundIcon="@mipmap/bz_launcher" /></manifest>' > /tmp/bz-icon-check/AndroidManifest.xml
+          "$AAPT" link -I "$ANDROID_HOME/platforms/android-36/android.jar" --manifest /tmp/bz-icon-check/AndroidManifest.xml --min-sdk-version 29 --target-sdk-version 36 -o /tmp/bz-icon-check/icon-resources.apk /tmp/bz-icon-check/resources.zip
+          echo 'PASS: actual adaptive and legacy icon resources compiled and linked with Android SDK 36. This is not a complete game APK build.' > brand-menus/verification/android-resources.txt
+          "$AAPT" dump resources /tmp/bz-icon-check/icon-resources.apk >> brand-menus/verification/android-resources.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brand-menu-prepared-assets
+          path: brand-menus/payload/
+          retention-days: 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brand-menu-android-results
+          path: brand-menus/verification/
+          retention-days: 2
+  browser:
+    needs: assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: brand-menu-prepared-assets
+          path: brand-menus/payload
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Real Chromium media and UI transition checks
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node brand-menus/tests/browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: brand-menu-browser-results
+          path: brand-menus/verification/
+          retention-days: 2
+  windows:
+    needs: assets
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: brand-menu-prepared-assets
+          path: brand-menus/payload
+      - name: Windows PowerShell apply and original-file preservation
+        shell: powershell
+        run: |
+          .\brand-menus\tests\windows.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: brand-menu-windows-results
+          path: brand-menus/verification/
+          retention-days: 2
+  package:
+    needs: [assets, browser, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: brand-menu-prepared-assets
+          path: deliver/BattleZone_MenuLogo_Update/payload
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: brand-menu-*-results
+          path: deliver/BattleZone_MenuLogo_Update/verification
+          merge-multiple: true
+      - name: Package a simple double-click updater
+        run: |
+          cp brand-menus/APPLY_UPDATE.cmd brand-menus/Apply_Update.ps1 brand-menus/README_KO.txt deliver/BattleZone_MenuLogo_Update/
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          p=Path('deliver/BattleZone_MenuLogo_Update')
+          f=p/'Apply_Update.ps1';f.write_bytes(b'\xef\xbb\xbf'+f.read_bytes().lstrip(b'\xef\xbb\xbf'))
+          f=p/'README_KO.txt';f.write_bytes(b'\xef\xbb\xbf'+f.read_bytes())
+          files=sorted(x for x in p.rglob('*') if x.is_file())
+          (p/'SHA256SUMS.txt').write_text('\n'.join(hashlib.sha256(x.read_bytes()).hexdigest()+'  '+x.relative_to(p).as_posix() for x in files)+'\n')
+          assert not any(x.suffix.lower() in ['.ttf','.otf','.ttc','.woff','.woff2'] for x in files)
+          print('Files:',len(files),'Bytes:',sum(x.stat().st_size for x in files))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BattleZone_MenuLogo_Update
+          path: deliver/
+          if-no-files-found: error
+          retention-days: 7
