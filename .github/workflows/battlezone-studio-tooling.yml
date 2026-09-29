@@ -1,0 +1,34 @@
+name: BattleZone Android Studio tooling
+on:
+  push:
+    branches: [battlezone-studio-tooling-20260928]
+    paths: [.github/workflows/battlezone-studio-tooling.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download verified official build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/wrapper bundle/compile-only
+          base=https://raw.githubusercontent.com/gradle/gradle/v8.14.3
+          curl --fail --location --retry 2 "$base/gradlew" -o bundle/wrapper/gradlew
+          curl --fail --location --retry 2 "$base/gradlew.bat" -o bundle/wrapper/gradlew.bat
+          curl --fail --location --retry 2 "$base/gradle/wrapper/gradle-wrapper.jar" -o bundle/wrapper/gradle-wrapper.jar
+          echo '7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  bundle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.14.3-bin.zip.sha256 -o bundle/wrapper/distribution.sha256
+          curl --fail --location --retry 2 "$base/LICENSE" -o bundle/wrapper/GRADLE_LICENSE.txt
+          if [ -f "$ANDROID_HOME/platforms/android-36/android.jar" ]; then cp "$ANDROID_HOME/platforms/android-36/android.jar" bundle/compile-only/android.jar; fi
+          curl --fail --location --retry 2 https://dl.google.com/dl/android/maven2/androidx/webkit/webkit/1.14.0/webkit-1.14.0.aar -o bundle/compile-only/webkit.aar
+          (cd bundle && find . -type f -print0 | sort -z | xargs -0 sha256sum > CHECKSUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: battlezone-verified-android-tooling
+          path: bundle/
+          if-no-files-found: error
+          retention-days: 3
