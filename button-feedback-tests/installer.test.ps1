@@ -19,8 +19,13 @@ function Fixture([string]$Name, [bool]$Bom=$false) {
     return $Project
 }
 function Apply([string]$Project) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Source 'Apply_ButtonSound.ps1') -ProjectPath $Project 2>&1 | ForEach-Object { Write-Host $_ }
-    return $LASTEXITCODE
+    $OldPreference=$ErrorActionPreference
+    try {
+        $ErrorActionPreference='Continue'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Source 'Apply_ButtonSound.ps1') -ProjectPath $Project 2>&1 | ForEach-Object { Write-Host $_ }
+        $Code=$LASTEXITCODE
+    } finally { $ErrorActionPreference=$OldPreference }
+    return $Code
 }
 try {
     foreach($WithBom in @($false,$true)) {
