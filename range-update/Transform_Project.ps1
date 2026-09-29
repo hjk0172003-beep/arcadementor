@@ -13,14 +13,12 @@ function Get-BattleZoneUpdate([string]$Html,[string]$Game) {
     }
     $NewLine = if ($Html.Contains("`r`n")) { "`r`n" } else { "`n" }
     if (-not $Game.Contains($Marker)) {
-        # Remove both complete setting rows, not merely their labels or styling.
         $TotalPanel = '(?s)<div\s+class="settingLabel">[^<]*<span>[^<]*</span></div>\s*<div\s+class="stepper">\s*<button\s+id="totalNone"[^>]*>.*?</div>'
         $ShotPanel = '(?s)<div\s+class="settingLabel">[^<]*<span>[^<]*</span></div>\s*<div\s+class="stepper">\s*<button\s+id="shotNone"[^>]*>.*?</div>'
         $ClockRow = '(?s)<div\s+class="timerRow">(?:(?!</div>).)*\bid="totalClock"(?:(?!</div>).)*\bid="shotClock"(?:(?!</div>).)*</div>'
         $Html = Replace-One $Html $TotalPanel '' 'total-time setting row'
         $Html = Replace-One $Html $ShotPanel '' 'per-shot-time setting row'
         $Html = Replace-One $Html $ClockRow '' 'live countdown row'
-        # Remove references to those deleted controls.
         $SetupClock = '(?m)^[ \t]*\$\(''totalValue''\)\.textContent=[^\r\n]*\$\(''shotValue''\)[^\r\n]*selectStyle\(\$\(''shotNone''\),!settings\.shotLimit\);[ \t]*\r?$'
         $Game = Replace-One $Game $SetupClock '' 'time-setting renderer'
         $BindSteps = '(?m)^for\(const \[id,key,step\] of \[\[''totalMinus''[^\r\n]*\]\)bind\(id,[^\r\n]*\);[ \t]*\r?$'
@@ -29,8 +27,7 @@ function Get-BattleZoneUpdate([string]$Html,[string]$Game) {
         $Game = Replace-One $Game $BindNone '' 'no-time-limit bindings'
         $ClockFunction = '(?m)^function renderClocks\(\)\{[^\r\n]*\}[ \t]*\r?$'
         $Game = Replace-One $Game $ClockFunction 'function renderClocks(){}' 'countdown renderer'
-        # Delete the timeout and automatic match-ending branches themselves.
-        # Elapsed timestamps are preserved for records and replays; they no longer impose a limit.
+        # Remove the actual enforcement; keep elapsed timestamps for records/replays.
         $ShotCheck = 'if\(session\.config\.shotLimit&&[^{}\r\n]*\)\{[^{}\r\n]*\}'
         $TotalCheck = 'if\(session\.config\.totalLimit&&[^{}\r\n]*\)\{[^{}\r\n]*\}'
         $Game = Replace-One $Game $ShotCheck '' 'per-shot timeout branch'
@@ -39,12 +36,12 @@ function Get-BattleZoneUpdate([string]$Html,[string]$Game) {
         $Game = Replace-One $Game 'const sessionConfig\s*=\s*clone\(settings\);' 'const sessionConfig=clone(settings);sessionConfig.shotLimit=0;sessionConfig.totalLimit=0;' 'new-session time limits'
         $Game += $NewLine + $Marker + $NewLine
     }
-    # A cancelled timeout-zero-score request must not survive in the runtime.
     if ($Game -match 'if\s*\(\s*session\.config\.(shotLimit|totalLimit)' -or $Game -match 'effect\([''"]timeout[''"]\)') {
         throw 'An unrecognized timeout handler remains. Nothing was changed.'
     }
     foreach ($Id in @('totalNone','totalMinus','totalPlus','totalValue','shotNone','shotMinus','shotPlus','shotValue','totalClock','shotClock')) {
-        if ($Html.Contains('id="'+$Id+'"') -or $Game.Contains("$('"+$Id+"')")) {
+        $Lookup = '$(' + [char]39 + $Id + [char]39 + ')'
+        if ($Html.Contains('id="'+$Id+'"') -or $Game.Contains($Lookup)) {
             throw ('A removed time control is still referenced: '+$Id+'. Nothing was changed.')
         }
     }
