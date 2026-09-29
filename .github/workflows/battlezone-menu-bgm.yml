@@ -1,0 +1,95 @@
+name: BattleZone menu BGM update
+on:
+  push:
+    branches: [battlezone-menu-bgm-20260930]
+    paths:
+      - 'menu-bgm-update/**'
+      - 'menu-bgm-tests/**'
+      - '.github/workflows/battlezone-menu-bgm.yml'
+permissions:
+  contents: read
+concurrency:
+  group: battlezone-menu-bgm-check
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test isolated BGM with actual browser audio
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+          node --check menu-bgm-update/bz-menu-music.js
+          node menu-bgm-tests/browser.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu-bgm-browser-results
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 3
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test safe updater in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\menu-bgm-tests\installer.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu-bgm-windows-results
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 3
+  package:
+    needs: [browser, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: menu-bgm-*-results
+          path: test-results
+          merge-multiple: true
+      - name: Create ZIP and integrity manifest
+        run: |
+          python3 - <<'PY'
+          import pathlib, shutil, hashlib, json, zipfile
+          root=pathlib.Path('bundle/BattleZone_MenuBGM_Update')
+          shutil.copytree('menu-bgm-update',root)
+          shutil.copytree('test-results',root/'tests')
+          cmd=root/'APPLY_UPDATE.cmd'
+          cmd.write_bytes(cmd.read_bytes().replace(b'\r\n',b'\n').replace(b'\n',b'\r\n'))
+          # UTF-8 BOM makes Korean readme readable in Windows Notepad.
+          readme=root/'README_KO.txt'
+          readme.write_bytes(b'\xef\xbb\xbf'+readme.read_bytes().removeprefix(b'\xef\xbb\xbf'))
+          manifest={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
+          (root/'SHA256.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+          with zipfile.ZipFile('BattleZone_MenuBGM_Update.zip','w',zipfile.ZIP_DEFLATED) as z:
+            for p in sorted(root.rglob('*')):
+              if p.is_file():z.write(p,p.relative_to(root.parent))
+          with zipfile.ZipFile('BattleZone_MenuBGM_Update.zip') as z:
+            assert z.testzip() is None
+            for name,digest in manifest.items():
+              assert hashlib.sha256(z.read(root.name+'/'+name)).hexdigest()==digest
+          print('ZIP CONTENTS AND CRC VERIFIED')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BattleZone_MenuBGM_Update
+          path: bundle/
+          if-no-files-found: error
+          retention-days: 7
