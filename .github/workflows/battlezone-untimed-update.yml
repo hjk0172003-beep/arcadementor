@@ -1,0 +1,93 @@
+name: BattleZone no timers and button sound
+on:
+  push:
+    branches: [battlezone-button-feedback-20260929]
+    paths: ['range-update/**', 'range-update-tests/**', '.github/workflows/battlezone-untimed-update.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: battlezone-untimed-update
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify isolated button sound with real Chromium
+        run: |
+          set -euo pipefail
+          node --check button-feedback/ui-button-sound.js
+          npm install --no-save --no-package-lock playwright@1.55.1
+          npx playwright install --with-deps chromium
+          node button-feedback-tests/browser.test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: untimed-browser-checks
+          path: test-results/browser.json
+          retention-days: 5
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Test installer with Windows PowerShell 5.1
+        shell: powershell
+        run: .\range-update-tests\verify.ps1
+      - name: Verify patched JavaScript and untimed behavior contract
+        shell: pwsh
+        run: |
+          node --check test-results/patched-fixture.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node range-update-tests/untimed.test.mjs
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: untimed-windows-checks
+          path: |
+            test-results/installer.json
+            test-results/untimed.json
+          retention-days: 5
+          if-no-files-found: warn
+  package:
+    needs: [browser, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: untimed-*-checks
+          path: collected-checks
+          merge-multiple: true
+      - name: Package one simple Windows updater
+        run: |
+          set -euo pipefail
+          mkdir -p output/BattleZone_Update/checks
+          cp range-update/* output/BattleZone_Update/
+          cp button-feedback/ui-button-sound.js output/BattleZone_Update/
+          cp collected-checks/*.json output/BattleZone_Update/checks/
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('output/BattleZone_Update')
+          for p in root.glob('checks/*.json'):
+              data=json.loads(p.read_text(encoding='utf-8-sig'))
+              print(p.name,data['passed'],data['scope'])
+          (root/'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.relative_to(root).as_posix()+'\n' for p in sorted(root.rglob('*')) if p.is_file()),encoding='utf8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BattleZone_NoTimers_ButtonSound_Update
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
