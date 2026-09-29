@@ -1,0 +1,62 @@
+name: BattleZone local compilation tools
+on:
+  push:
+    branches: [battlezone-studio-tooling-20260928]
+    paths: [.github/workflows/battlezone-offline-compile-tools.yml]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Resolve public tools with a disposable empty app (no game files)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/empty-android/app/src/main/java/example/compile
+          cd /tmp/empty-android
+          printf 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\ndependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\nrootProject.name="ToolchainCheck"\ninclude(":app")\n' > settings.gradle
+          echo "plugins { id 'com.android.application' version '8.13.0' apply false }" > build.gradle
+          printf 'android.useAndroidX=true\norg.gradle.jvmargs=-Xmx2048m\n' > gradle.properties
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'example.compile'
+            compileSdk 36
+            buildToolsVersion '35.0.0'
+            defaultConfig { applicationId 'example.compile'; minSdk 29; targetSdk 36; versionCode 1; versionName '1.0' }
+            buildTypes { release { minifyEnabled true; shrinkResources true; proguardFiles getDefaultProguardFile('proguard-android-optimize.txt') } }
+            compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+            buildFeatures { buildConfig true }
+          }
+          dependencies { implementation 'androidx.webkit:webkit:1.14.0' }
+          EOF
+          echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application android:label="Build tools only"><activity android:name=".MainActivity" android:exported="true" /></application></manifest>' > app/src/main/AndroidManifest.xml
+          echo 'package example.compile; public final class MainActivity extends android.app.Activity {}' > app/src/main/java/example/compile/MainActivity.java
+          mkdir -p gradle/wrapper
+          curl -fsSL https://raw.githubusercontent.com/gradle/gradle/v8.14.3/gradlew -o gradlew
+          curl -fsSL https://raw.githubusercontent.com/gradle/gradle/v8.14.3/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
+          echo '7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          printf 'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\ndistributionSha256Sum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531\n' > gradle/wrapper/gradle-wrapper.properties
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :app:lintDebug
+          mkdir -p /tmp/portable-sdk/platforms /tmp/portable-sdk/build-tools /tmp/portable-gradle/caches
+          cp -a "$ANDROID_HOME/platforms/android-36" /tmp/portable-sdk/platforms/
+          cp -a "$ANDROID_HOME/build-tools/35.0.0" /tmp/portable-sdk/build-tools/
+          cp -a "$ANDROID_HOME/licenses" /tmp/portable-sdk/
+          cp -a "$HOME/.gradle/caches/modules-2" /tmp/portable-gradle/caches/
+          cp -a "$HOME/.gradle/wrapper" /tmp/portable-gradle/
+          find /tmp/portable-gradle -name '*.lock' -delete
+          tar -C /tmp -czf /tmp/battlezone-compile-tools.tgz portable-sdk portable-gradle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: battlezone-offline-compile-tools
+          path: /tmp/battlezone-compile-tools.tgz
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
