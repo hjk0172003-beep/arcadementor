@@ -19,13 +19,13 @@ function Get-BattleZoneUpdate([string]$Html,[string]$Game) {
         $Html = Replace-One $Html $TotalPanel '' 'total-time setting row'
         $Html = Replace-One $Html $ShotPanel '' 'per-shot-time setting row'
         $Html = Replace-One $Html $ClockRow '' 'live countdown row'
-        $SetupClock = '(?m)^[ \t]*\$\(''totalValue''\)\.textContent=[^\r\n]*\$\(''shotValue''\)[^\r\n]*selectStyle\(\$\(''shotNone''\),!settings\.shotLimit\);[ \t]*\r?$'
+        $SetupClock = '(?m)^[ \t]*\$\(''totalValue''\)\.textContent=[^\r\n]*\$\(''shotValue''\)[^\r\n]*selectStyle\(\$\(''shotNone''\),!settings\.shotLimit\);[ \t]*\r*$'
         $Game = Replace-One $Game $SetupClock '' 'time-setting renderer'
-        $BindSteps = '(?m)^for\(const \[id,key,step\] of \[\[''totalMinus''[^\r\n]*\]\)bind\(id,[^\r\n]*\);[ \t]*\r?$'
+        $BindSteps = '(?m)^for\(const \[id,key,step\] of \[\[''totalMinus''[^\r\n]*\]\)bind\(id,[^\r\n]*\);[ \t]*\r*$'
         $Game = Replace-One $Game $BindSteps '' 'time +/- bindings'
-        $BindNone = '(?m)^bind\(''totalNone''[^\r\n]*bind\(''shotNone''[^\r\n]*\);[ \t]*\r?$'
+        $BindNone = '(?m)^bind\(''totalNone''[^\r\n]*bind\(''shotNone''[^\r\n]*\);[ \t]*\r*$'
         $Game = Replace-One $Game $BindNone '' 'no-time-limit bindings'
-        $ClockFunction = '(?m)^function renderClocks\(\)\{[^\r\n]*\}[ \t]*\r?$'
+        $ClockFunction = '(?m)^function renderClocks\(\)\{[^\r\n]*\}[ \t]*\r*$'
         $Game = Replace-One $Game $ClockFunction 'function renderClocks(){}' 'countdown renderer'
         # Remove the actual enforcement; keep elapsed timestamps for records/replays.
         $ShotCheck = 'if\(session\.config\.shotLimit&&[^{}\r\n]*\)\{[^{}\r\n]*\}'
@@ -36,6 +36,8 @@ function Get-BattleZoneUpdate([string]$Html,[string]$Game) {
         $Game = Replace-One $Game 'const sessionConfig\s*=\s*clone\(settings\);' 'const sessionConfig=clone(settings);sessionConfig.shotLimit=0;sessionConfig.totalLimit=0;' 'new-session time limits'
         $Game += $NewLine + $Marker + $NewLine
     }
+    # Remove only the old reference to this app's custom timers, not official Olympic rules.
+    $Game=$Game.Replace([regex]::Unescape(', \uC0AC\uC6A9\uC790 \uC2DC\uAC04\uC81C\uD55C'),'')
     if ($Game -match 'if\s*\(\s*session\.config\.(shotLimit|totalLimit)' -or $Game -match 'effect\([''"]timeout[''"]\)') {
         throw 'An unrecognized timeout handler remains. Nothing was changed.'
     }
