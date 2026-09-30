@@ -1,0 +1,100 @@
+name: BattleZone small impact markers
+on:
+  push:
+    branches: [battlezone-small-impact-20261001]
+    paths: ['small-impact/**', '.github/workflows/battlezone-small-impact.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: battlezone-small-impact
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate the exact patch payload syntax
+        run: node --check small-impact/payload/drawMarks.js
+      - name: Test patching and preservation with Windows PowerShell 5.1
+        shell: powershell
+        run: .\small-impact\tests\windows.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: small-impact-windows-results
+          path: small-impact/verification/
+          retention-days: 3
+  rendering:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run geometry and actual Chromium drawing checks
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node small-impact/tests/render.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: small-impact-rendering-results
+          path: small-impact/verification/
+          retention-days: 3
+  package:
+    needs: [windows, rendering]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: small-impact-*-results
+          path: deliver/BattleZone_SmallMarks_Update/verification
+          merge-multiple: true
+      - name: Package short ASCII paths and verify ZIP round trip
+        run: |
+          mkdir -p deliver/BattleZone_SmallMarks_Update/payload
+          cp small-impact/APPLY_UPDATE.cmd small-impact/Apply_Update.ps1 small-impact/README_KO.txt deliver/BattleZone_SmallMarks_Update/
+          cp small-impact/payload/drawMarks.js deliver/BattleZone_SmallMarks_Update/payload/
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZipInfo,ZIP_DEFLATED
+          import hashlib,json,tempfile
+          p=Path('deliver/BattleZone_SmallMarks_Update')
+          # UTF-8 BOM for Windows PowerShell / Notepad Korean text; never include font files.
+          for name in ['Apply_Update.ps1','README_KO.txt']:
+              f=p/name;b=f.read_bytes();f.write_bytes(b'\xef\xbb\xbf'+b.removeprefix(b'\xef\xbb\xbf'))
+          f=p/'APPLY_UPDATE.cmd';s=f.read_text().replace('\r\n','\n');f.write_bytes(s.replace('\n','\r\n').encode('ascii'))
+          sums={f.relative_to(p).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in p.rglob('*') if f.is_file()}
+          (p/'SHA256SUMS.txt').write_text('\n'.join(h+'  '+name for name,h in sorted(sums.items()))+'\n')
+          with ZipFile('/tmp/SmallMarks.zip','w',ZIP_DEFLATED,allowZip64=False) as z:
+              for f in sorted(p.rglob('*')):
+                  if not f.is_file():continue
+                  info=ZipInfo(f.relative_to(p.parent).as_posix());info.create_system=0;info.external_attr=0x20;info.compress_type=ZIP_DEFLATED
+                  z.writestr(info,f.read_bytes(),compresslevel=6)
+          with ZipFile('/tmp/SmallMarks.zip') as z:
+              assert z.testzip() is None
+              for f in p.rglob('*'):
+                  if f.is_file():assert z.read(f.relative_to(p.parent).as_posix())==f.read_bytes()
+          print('ZIP round-trip and file preservation verified. No full APK build was performed.')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BattleZone_SmallMarks_Update
+          path: deliver/
+          if-no-files-found: error
+          retention-days: 14
