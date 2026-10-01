@@ -1,0 +1,73 @@
+name: BattleZone paper color tabs
+on:
+  push:
+    branches: [battlezone-paper-tabs-20261002]
+    paths: ['paper-tabs/**', '.github/workflows/battlezone-paper-tabs.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node paper-tabs/tests/browser.cjs
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - shell: powershell
+        run: .\paper-tabs\tests\windows.ps1
+  package:
+    needs: [browser, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Package Windows-friendly ZIP
+        run: |
+          mkdir -p deliver/BattleZone_PaperTabs_Update/payload
+          cp paper-tabs/APPLY_UPDATE.cmd paper-tabs/Apply_Update.ps1 paper-tabs/README_KO.txt deliver/BattleZone_PaperTabs_Update/
+          cp paper-tabs/payload/bz-paper-tabs.js deliver/BattleZone_PaperTabs_Update/payload/
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZIP_DEFLATED
+          import hashlib
+          p=Path('deliver/BattleZone_PaperTabs_Update')
+          for name in ['Apply_Update.ps1','README_KO.txt']:
+              f=p/name
+              b=f.read_bytes()
+              if not b.startswith(b'\xef\xbb\xbf'):
+                  f.write_bytes(b'\xef\xbb\xbf'+b)
+          sums=[]
+          for f in sorted(p.rglob('*')):
+              if f.is_file():
+                  sums.append(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.relative_to(p).as_posix())
+          (p/'SHA256SUMS.txt').write_text('\n'.join(sums)+'\n',encoding='utf-8')
+          with ZipFile('/tmp/check.zip','w',ZIP_DEFLATED) as z:
+              for f in sorted(p.rglob('*')):
+                  if f.is_file(): z.write(f,f.relative_to(p.parent))
+          with ZipFile('/tmp/check.zip') as z:
+              assert z.testzip() is None
+          print('ZIP verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BattleZone_PaperTabs_Update
+          path: deliver/
+          if-no-files-found: error
+          retention-days: 14
